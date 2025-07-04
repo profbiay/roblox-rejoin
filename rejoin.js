@@ -7,7 +7,6 @@ const { execSync, exec } = require("child_process");
 // ✅ Auto cài công cụ cần thiết
 function ensureEnv() {
   const cmds = [
-    ["tsu", "pkg install -y tsu"],
     ["which", "pkg install -y which"],
     ["termux-wake-lock", "termux-wake-lock"]
   ];
@@ -44,8 +43,8 @@ function ensureRoot() {
     if (uid !== "0") {
       const nodePath = execSync("which node").toString().trim();
       const scriptPath = __filename;
-      console.log("🔐 Yêu cầu root, đang chuyển qua tsu...");
-      execSync(`tsu -c "${nodePath} ${scriptPath}"`, { stdio: "inherit" });
+      console.log("🔐 Yêu cầu root, đang chuyển qua su...");
+      execSync(`su -c "${nodePath} ${scriptPath}"`, { stdio: "inherit" });
       process.exit(0);
     }
   } catch (err) {
