@@ -188,12 +188,25 @@ function question(rl, msg) {
   while (true) {
     const presence = await getPresence(userId);
     let msg = "";
+
     if (!presence) {
       msg = "⚠️ Không lấy được trạng thái";
     } else if (presence.userPresenceType !== 2) {
       msg = "👋 User không online";
       killApp();
       launch(game.placeId, game.linkCode);
+
+      // 🔄 Thử lại 3 lần nếu user offline
+      for (let i = 0; i < 3; i++) {
+        console.log(`🕒 Đang đợi user online... (${i + 1}/3)`);
+        await new Promise(r => setTimeout(r, 5000));
+        const retry = await getPresence(userId);
+        if (retry?.userPresenceType === 2) {
+          console.log("✅ User đã online!");
+          break;
+        }
+      }
+
     } else if (`${presence.placeId}` !== `${game.placeId}`) {
       msg = `⚠️ Đang ở sai game (${presence.placeId})`;
       killApp();
@@ -201,6 +214,7 @@ function question(rl, msg) {
     } else {
       msg = "✅ Đang đúng game rồi!";
     }
+
     console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
     await new Promise((r) => setTimeout(r, delayMs));
   }
