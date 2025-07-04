@@ -2,9 +2,8 @@
 
 const readline = require("readline");
 const { execSync, exec } = require("child_process");
-const path = require("path");
 
-// 🛠️ Check & cài nếu thiếu package
+// 📦 Đảm bảo tool cần thiết
 function ensureCommand(cmd, pkgName = cmd) {
   try {
     execSync(`command -v ${cmd}`, { stdio: "ignore" });
@@ -19,7 +18,7 @@ function ensureCommand(cmd, pkgName = cmd) {
   }
 }
 
-// ⚡ Wake lock để không sleep
+// 🔋 Wake lock để máy không sleep
 function enableWakeLock() {
   try {
     execSync("termux-wake-lock");
@@ -29,7 +28,7 @@ function enableWakeLock() {
   }
 }
 
-// 📦 Đảm bảo thư viện axios đã cài
+// 📦 Cài thư viện axios nếu chưa có
 function ensureAxios() {
   try {
     require.resolve("axios");
@@ -63,7 +62,7 @@ function ensureRoot() {
   }
 }
 
-// 📡 Lấy UserID từ username
+// 📡 Lấy user ID từ username
 async function getUserId(username) {
   try {
     const res = await axios.post("https://users.roblox.com/v1/usernames/users", {
@@ -77,24 +76,24 @@ async function getUserId(username) {
   }
 }
 
-// 👀 Xem user có đang trong game không
+// 👀 Kiểm tra trạng thái user
 async function getPresence(userId) {
   try {
     const res = await axios.post("https://presence.roblox.com/v1/presence/users", {
       userIds: [userId]
     });
     return res.data.userPresences?.[0];
-  } catch (err) {
+  } catch {
     return null;
   }
 }
 
-// 🧼 Kill Roblox app
+// 🧼 Tắt app
 function killApp() {
   exec("am force-stop com.roblox.client");
 }
 
-// 🏁 Mở lại game
+// 🏁 Mở lại app
 function launch(placeId, linkCode = null) {
   const url = linkCode
     ? `roblox://placeID=${placeId}&linkCode=${linkCode}`
@@ -102,17 +101,7 @@ function launch(placeId, linkCode = null) {
   exec(`am start -a android.intent.action.VIEW -d "${url}"`);
 }
 
-// 🔄 Kiểm tra app có đang chạy
-function isRunning() {
-  try {
-    const pid = execSync("pidof com.roblox.client").toString().trim();
-    return pid.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-// 🎮 List game
+// 🎮 Game list
 const GAMES = {
   "1": ["126884695634066", "Grow-a-Garden"],
   "2": ["2753915549", "Blox-Fruits"],
@@ -123,12 +112,17 @@ const GAMES = {
   "0": ["custom", "🔧 Tùy chỉnh"]
 };
 
-// 🧠 Hỏi chọn game
+// 💬 Hỏi người dùng
+function question(rl, msg) {
+  return new Promise((resolve) => rl.question(msg, resolve));
+}
+
+// 🧠 Chọn game
 async function chooseGame(rl) {
   console.log("🎮 Chọn game:");
-  Object.keys(GAMES).forEach((key) => {
+  for (const key in GAMES) {
     console.log(`${key}. ${GAMES[key][1]} (${GAMES[key][0]})`);
-  });
+  }
 
   const ans = await question(rl, "Nhập số: ");
   if (ans.trim() === "0") {
@@ -147,11 +141,6 @@ async function chooseGame(rl) {
   } else {
     throw new Error("❌ Không hợp lệ");
   }
-}
-
-// 🔁 Hỏi người dùng
-function question(rl, msg) {
-  return new Promise((resolve) => rl.question(msg, resolve));
 }
 
 // 🚀 Main
@@ -185,9 +174,22 @@ function question(rl, msg) {
   console.log(`👤 ${username} | 🎮 ${game.name} (${game.placeId})`);
   console.log(`🔁 Auto-check mỗi ${delayMin} phút`);
 
+  let isFirstCheck = true;
+
   while (true) {
     const presence = await getPresence(userId);
     let msg = "";
+
+    // 👋 Skip log lần đầu nếu user offline
+    if (isFirstCheck) {
+      isFirstCheck = false;
+      if (!presence || presence.userPresenceType !== 2) {
+        killApp();
+        launch(game.placeId, game.linkCode);
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
+      }
+    }
 
     if (!presence) {
       msg = "⚠️ Không lấy được trạng thái";
@@ -196,7 +198,6 @@ function question(rl, msg) {
       killApp();
       launch(game.placeId, game.linkCode);
 
-      // 🔄 Thử lại 3 lần nếu user offline
       for (let i = 0; i < 3; i++) {
         console.log(`🕒 Đang đợi user online... (${i + 1}/3)`);
         await new Promise(r => setTimeout(r, 5000));
