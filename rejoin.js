@@ -1,26 +1,63 @@
 #!/usr/bin/env node
 
-const axios = require("axios");
-const readline = require("readline");
-const { execSync, exec } = require("child_process");
+const fs = require("fs");
 const path = require("path");
+const { execSync, exec } = require("child_process");
 
-// 🔐 Auto root nếu chưa root
+// ✅ Auto cài công cụ cần thiết
+function ensureEnv() {
+  const cmds = [
+    ["tsu", "pkg install -y tsu"],
+    ["which", "pkg install -y which"],
+    ["termux-wake-lock", "termux-wake-lock"]
+  ];
+
+  cmds.forEach(([cmd, installCmd]) => {
+    try {
+      execSync(`command -v ${cmd}`);
+    } catch {
+      console.log(`📦 Cài ${cmd}...`);
+      try {
+        execSync(installCmd, { stdio: "inherit" });
+      } catch (e) {
+        console.error(`❌ Không cài được ${cmd}: ${e.message}`);
+      }
+    }
+  });
+
+  // ✅ Cài thư viện npm nếu chưa có
+  const required = ["axios"];
+  required.forEach((pkg) => {
+    try {
+      require.resolve(pkg);
+    } catch {
+      console.log(`📦 Đang cài thư viện npm: ${pkg}...`);
+      execSync(`npm install ${pkg}`, { stdio: "inherit" });
+    }
+  });
+}
+
+// 🔐 Root nếu chưa có
 function ensureRoot() {
   try {
     const uid = execSync("id -u").toString().trim();
     if (uid !== "0") {
       const nodePath = execSync("which node").toString().trim();
       const scriptPath = __filename;
-      console.log("🔐 Cần quyền root, đang chuyển qua su...");
-      execSync(`su -c "${nodePath} ${scriptPath}"`, { stdio: "inherit" });
+      console.log("🔐 Yêu cầu root, đang chuyển qua tsu...");
+      execSync(`tsu -c "${nodePath} ${scriptPath}"`, { stdio: "inherit" });
       process.exit(0);
     }
   } catch (err) {
-    console.error("❌ Không thể chạy bằng root:", err.message);
+    console.error("❌ Không thể chạy với root:", err.message);
     process.exit(1);
   }
 }
+
+// ==== PHẦN GỐC (giữ nguyên) ====
+
+const axios = require("axios");
+const readline = require("readline");
 
 // 📡 Lấy UserID từ username
 async function getUserId(username) {
@@ -113,8 +150,9 @@ function question(rl, msg) {
   return new Promise((resolve) => rl.question(msg, resolve));
 }
 
-// 🚀 Main
+// 🚀 MAIN
 (async () => {
+  ensureEnv();
   ensureRoot();
 
   const rl = readline.createInterface({
