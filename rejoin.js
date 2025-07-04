@@ -1,56 +1,55 @@
 #!/usr/bin/env node
 
-const readline = require("readline");
 const { execSync, exec } = require("child_process");
-
-// 📦 Đảm bảo tool cần thiết
-function ensureCommand(cmd, pkgName = cmd) {
-  try {
-    execSync(`command -v ${cmd}`, { stdio: "ignore" });
-  } catch {
-    console.log(`📦 Đang cài ${pkgName}...`);
-    try {
-      execSync(`pkg install -y ${pkgName}`, { stdio: "inherit" });
-    } catch (err) {
-      console.error(`❌ Không thể cài ${pkgName}:`, err.message);
-      process.exit(1);
-    }
-  }
-}
-
-// 🔋 Wake lock để máy không sleep
-function enableWakeLock() {
-  try {
-    execSync("termux-wake-lock");
-    console.log("🔋 Đã bật wakelock");
-  } catch (err) {
-    console.warn("⚠️ Không bật được wakelock:", err.message);
-  }
-}
-
-// 📦 Cài thư viện axios nếu chưa có
-function ensureAxios() {
-  try {
-    require.resolve("axios");
-  } catch {
-    console.log("📦 Đang cài axios...");
-    execSync("npm install axios", { stdio: "inherit" });
-  }
-}
-
-ensureCommand("su");
-ensureCommand("which");
-enableWakeLock();
-ensureAxios();
-
+const readline = require("readline");
 const axios = require("axios");
+const path = require("path");
 
-// 🔐 Auto root nếu chưa root
+// 📦 Cài thư viện nếu thiếu
+function ensureDeps() {
+  const deps = ["axios"];
+  deps.forEach(dep => {
+    try {
+      require.resolve(dep);
+    } catch {
+      console.log(`📦 Đang cài ${dep}...`);
+      execSync(`npm install ${dep}`, { stdio: "inherit" });
+    }
+  });
+}
+
+// 🔧 Cài su, which, wake lock nếu thiếu
+function ensureBinaries() {
+  try {
+    execSync("which su");
+  } catch {
+    console.log("⚙️ Đang cài 'su'...");
+    execSync("pkg install -y tsu", { stdio: "inherit" });
+  }
+
+  try {
+    execSync("which which");
+  } catch {
+    console.log("⚙️ Đang cài 'which'...");
+    execSync("pkg install -y which", { stdio: "inherit" });
+  }
+
+  try {
+    execSync("which termux-wake-lock");
+    exec("termux-wake-lock"); // 🔒 tránh sleep
+  } catch {
+    console.log("⚙️ Đang cài 'termux-api'...");
+    execSync("pkg install -y termux-api", { stdio: "inherit" });
+    exec("termux-wake-lock");
+  }
+}
+
+// 🔐 Yêu cầu root
 function ensureRoot() {
   try {
     const uid = execSync("id -u").toString().trim();
     if (uid !== "0") {
-      const nodePath = process.execPath;
+      const nodePath = execSync("which node").toString().trim();
       const scriptPath = __filename;
       console.log("🔐 Cần quyền root, đang chuyển qua su...");
       execSync(`su -c "${nodePath} ${scriptPath}"`, { stdio: "inherit" });
@@ -62,7 +61,7 @@ function ensureRoot() {
   }
 }
 
-// 📡 Lấy user ID từ username
+// 📡 Lấy UserID từ username
 async function getUserId(username) {
   try {
     const res = await axios.post("https://users.roblox.com/v1/usernames/users", {
@@ -76,24 +75,24 @@ async function getUserId(username) {
   }
 }
 
-// 👀 Kiểm tra trạng thái user
+// 👀 Xem user có đang trong game không
 async function getPresence(userId) {
   try {
     const res = await axios.post("https://presence.roblox.com/v1/presence/users", {
       userIds: [userId]
     });
     return res.data.userPresences?.[0];
-  } catch {
+  } catch (err) {
     return null;
   }
 }
 
-// 🧼 Tắt app
+// 🧼 Kill Roblox app
 function killApp() {
   exec("am force-stop com.roblox.client");
 }
 
-// 🏁 Mở lại app
+// 🏁 Mở lại game
 function launch(placeId, linkCode = null) {
   const url = linkCode
     ? `roblox://placeID=${placeId}&linkCode=${linkCode}`
@@ -101,7 +100,17 @@ function launch(placeId, linkCode = null) {
   exec(`am start -a android.intent.action.VIEW -d "${url}"`);
 }
 
-// 🎮 Game list
+// 🔄 Kiểm tra app có đang chạy
+function isRunning() {
+  try {
+    const pid = execSync("pidof com.roblox.client").toString().trim();
+    return pid.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// 🎮 List game
 const GAMES = {
   "1": ["126884695634066", "Grow-a-Garden"],
   "2": ["2753915549", "Blox-Fruits"],
@@ -112,17 +121,12 @@ const GAMES = {
   "0": ["custom", "🔧 Tùy chỉnh"]
 };
 
-// 💬 Hỏi người dùng
-function question(rl, msg) {
-  return new Promise((resolve) => rl.question(msg, resolve));
-}
-
-// 🧠 Chọn game
+// 🧠 Hỏi chọn game
 async function chooseGame(rl) {
   console.log("🎮 Chọn game:");
-  for (const key in GAMES) {
+  Object.keys(GAMES).forEach((key) => {
     console.log(`${key}. ${GAMES[key][1]} (${GAMES[key][0]})`);
-  }
+  });
 
   const ans = await question(rl, "Nhập số: ");
   if (ans.trim() === "0") {
@@ -143,8 +147,15 @@ async function chooseGame(rl) {
   }
 }
 
+// 🔁 Hỏi người dùng
+function question(rl, msg) {
+  return new Promise((resolve) => rl.question(msg, resolve));
+}
+
 // 🚀 Main
 (async () => {
+  ensureDeps();
+  ensureBinaries();
   ensureRoot();
 
   const rl = readline.createInterface({
@@ -180,13 +191,13 @@ async function chooseGame(rl) {
     const presence = await getPresence(userId);
     let msg = "";
 
-    // 👋 Skip log lần đầu nếu user offline
     if (isFirstCheck) {
       isFirstCheck = false;
       if (!presence || presence.userPresenceType !== 2) {
+        console.log("🕒 User chưa online. Đang mở lại game...");
         killApp();
         launch(game.placeId, game.linkCode);
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 15000)); // ⏳ chờ 15s load app
         continue;
       }
     }
@@ -197,17 +208,6 @@ async function chooseGame(rl) {
       msg = "👋 User không online";
       killApp();
       launch(game.placeId, game.linkCode);
-
-      for (let i = 0; i < 3; i++) {
-        console.log(`🕒 Đang đợi user online... (${i + 1}/3)`);
-        await new Promise(r => setTimeout(r, 5000));
-        const retry = await getPresence(userId);
-        if (retry?.userPresenceType === 2) {
-          console.log("✅ User đã online!");
-          break;
-        }
-      }
-
     } else if (`${presence.placeId}` !== `${game.placeId}`) {
       msg = `⚠️ Đang ở sai game (${presence.placeId})`;
       killApp();
