@@ -1,32 +1,21 @@
 #!/usr/bin/env node
 
-const readline = require("readline");
 const { execSync, exec } = require("child_process");
-const fs = require("fs");
-
-// 📦 Ensure all required libs
-function ensureLibs() {
-  try {
-    require.resolve("axios");
-  } catch {
-    console.log("📦 Đang cài axios...");
-    execSync("npm install axios", { stdio: "inherit" });
-  }
-}
-ensureLibs();
+const readline = require("readline");
 const axios = require("axios");
 
-// 🔧 Ensure required commands & tools
-function setupEnvironment() {
+// 📦 Auto install missing libs
+function installIfMissing() {
   try {
-    execSync("command -v su || pkg install tsu -y", { stdio: "inherit" });
-    execSync("command -v which || pkg install which -y", { stdio: "inherit" });
-    exec("termux-wake-lock"); // giữ máy không ngủ
-  } catch (err) {
-    console.log("⚠️ Không thể đảm bảo môi trường:", err.message);
+    execSync("which which || pkg install -y which");
+    execSync("which su || pkg install -y tsu");
+    execSync("termux-wake-lock || echo wake-lock failed");
+    execSync("npm install axios readline");
+  } catch (e) {
+    console.error("❌ Lỗi khi cài dependencies:", e.message);
+    process.exit(1);
   }
 }
-setupEnvironment();
 
 // 🔐 Auto root nếu chưa root
 function ensureRoot() {
@@ -59,7 +48,7 @@ async function getUserId(username) {
   }
 }
 
-// 👀 Xem user có đang trong game không
+// 👀 Lấy trạng thái user
 async function getPresence(userId) {
   try {
     const res = await axios.post("https://presence.roblox.com/v1/presence/users", {
@@ -71,27 +60,19 @@ async function getPresence(userId) {
   }
 }
 
-// 🧼 Kill Roblox app
+// 🧼 Kill Roblox
 function killApp() {
-  exec("am force-stop com.roblox.client");
+  try {
+    execSync("am force-stop com.roblox.client");
+  } catch {}
 }
 
-// 🏁 Mở lại game
+// ▶️ Mở lại game
 function launch(placeId, linkCode = null) {
   const url = linkCode
     ? `roblox://placeID=${placeId}&linkCode=${linkCode}`
     : `roblox://placeID=${placeId}`;
   exec(`am start -a android.intent.action.VIEW -d "${url}"`);
-}
-
-// 🔄 Kiểm tra app có đang chạy
-function isRunning() {
-  try {
-    const pid = execSync("pidof com.roblox.client").toString().trim();
-    return pid.length > 0;
-  } catch {
-    return false;
-  }
 }
 
 // 🎮 List game
@@ -105,7 +86,7 @@ const GAMES = {
   "0": ["custom", "🔧 Tùy chỉnh"]
 };
 
-// 🧠 Hỏi chọn game
+// 📲 Hỏi chọn game
 async function chooseGame(rl) {
   console.log("🎮 Chọn game:");
   Object.keys(GAMES).forEach((key) => {
@@ -131,13 +112,14 @@ async function chooseGame(rl) {
   }
 }
 
-// 🔁 Hỏi người dùng
+// ❓ Hỏi input
 function question(rl, msg) {
   return new Promise((resolve) => rl.question(msg, resolve));
 }
 
 // 🚀 Main
 (async () => {
+  installIfMissing();
   ensureRoot();
 
   const rl = readline.createInterface({
@@ -156,6 +138,7 @@ function question(rl, msg) {
     rl.close();
     return;
   }
+
   console.log(`✅ User ID: ${userId}`);
 
   const game = await chooseGame(rl);
@@ -163,52 +146,34 @@ function question(rl, msg) {
   rl.close();
 
   const delayMs = Math.max(1, delayMin) * 60 * 1000;
+  let joinedAt = 0;
+
   console.clear();
   console.log(`👤 ${username} | 🎮 ${game.name} (${game.placeId})`);
   console.log(`🔁 Auto-check mỗi ${delayMin} phút`);
 
-  let joinedAt = 0;
-
   while (true) {
     const presence = await getPresence(userId);
-    const now = Date.now();
     let msg = "";
 
     if (!presence) {
       msg = "⚠️ Không lấy được trạng thái";
     } else if (presence.userPresenceType !== 2) {
       msg = "👋 User không online";
-
-      // chỉ rejoin nếu đã từng join & đủ delay
-      if (now - joinedAt > 30 * 1000) {
-        killApp();
-        launch(game.placeId, game.linkCode);
-        joinedAt = now;
-      } else {
-        msg += " (đợi thêm chút để tránh spam)";
-      }
+      killApp();
+      launch(game.placeId, game.linkCode);
+      joinedAt = Date.now(); // update joinedAt để tránh launch liên tục
     } else if (`${presence.placeId}` !== `${game.placeId}`) {
       msg = `⚠️ Đang ở sai game (${presence.placeId})`;
-
-      if (now - joinedAt > 30 * 1000) {
-        killApp();
-        launch(game.placeId, game.linkCode);
-        joinedAt = now;
-      } else {
-        msg += " (chờ delay để tránh spam)";
-      }
+      killApp();
+      launch(game.placeId, game.linkCode);
+      joinedAt = Date.now();
     } else {
       msg = "✅ Đang đúng game rồi!";
-      joinedAt = now;
+      joinedAt = Date.now();
     }
 
     console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
-
-    // Delay phù hợp
-    if (msg.startsWith("✅")) {
-      await new Promise((r) => setTimeout(r, delayMs));
-    } else {
-      await new Promise((r) => setTimeout(r, 5000));
-    }
+    await new Promise((r) => setTimeout(r, delayMs));
   }
 })();
