@@ -1,64 +1,67 @@
 #!/usr/bin/env node
 
-const fs = require("fs");
-const path = require("path");
+const readline = require("readline");
 const { execSync, exec } = require("child_process");
+const path = require("path");
 
-// ✅ Auto cài công cụ cần thiết
-function ensureEnv() {
-  const cmds = [
-    ["which", "pkg install -y which"],
-    ["termux-wake-lock", "termux-wake-lock"]
-  ];
-
-  cmds.forEach(([cmd, installCmd]) => {
+// 🛠️ Check & cài nếu thiếu package
+function ensureCommand(cmd, pkgName = cmd) {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+  } catch {
+    console.log(`📦 Đang cài ${pkgName}...`);
     try {
-      execSync(`command -v ${cmd}`);
-    } catch {
-      console.log(`📦 Cài ${cmd}...`);
-      try {
-        execSync(installCmd, { stdio: "inherit" });
-      } catch (e) {
-        console.error(`❌ Không cài được ${cmd}: ${e.message}`);
-      }
+      execSync(`pkg install -y ${pkgName}`, { stdio: "inherit" });
+    } catch (err) {
+      console.error(`❌ Không thể cài ${pkgName}:`, err.message);
+      process.exit(1);
     }
-  });
-
-  // ✅ Cài thư viện npm nếu chưa có
-  const required = ["axios"];
-  required.forEach((pkg) => {
-    try {
-      require.resolve(pkg);
-    } catch {
-      console.log(`📦 Đang cài thư viện npm: ${pkg}...`);
-      execSync(`npm install ${pkg}`, { stdio: "inherit" });
-    }
-  });
+  }
 }
 
-// 🔐 Root nếu chưa có
+// ⚡ Wake lock để không sleep
+function enableWakeLock() {
+  try {
+    execSync("termux-wake-lock");
+    console.log("🔋 Đã bật wakelock");
+  } catch (err) {
+    console.warn("⚠️ Không bật được wakelock:", err.message);
+  }
+}
+
+// 📦 Đảm bảo thư viện axios đã cài
+function ensureAxios() {
+  try {
+    require.resolve("axios");
+  } catch {
+    console.log("📦 Đang cài axios...");
+    execSync("npm install axios", { stdio: "inherit" });
+  }
+}
+
+ensureCommand("su");
+ensureCommand("which");
+enableWakeLock();
+ensureAxios();
+
+const axios = require("axios");
+
+// 🔐 Auto root nếu chưa root
 function ensureRoot() {
   try {
     const uid = execSync("id -u").toString().trim();
     if (uid !== "0") {
+      const nodePath = process.execPath;
       const scriptPath = __filename;
-      console.log("🔐 Yêu cầu root, đang chuyển qua su...");
-      execSync(`su -c "PATH=$PATH:/data/data/com.termux/files/usr/bin node ${scriptPath}"`, {
-        stdio: "inherit"
-      });
+      console.log("🔐 Cần quyền root, đang chuyển qua su...");
+      execSync(`su -c "${nodePath} ${scriptPath}"`, { stdio: "inherit" });
       process.exit(0);
     }
   } catch (err) {
-    console.error("❌ Không thể chạy với root:", err.message);
+    console.error("❌ Không thể chạy bằng root:", err.message);
     process.exit(1);
   }
 }
-
-
-// ==== PHẦN GỐC (giữ nguyên) ====
-
-const axios = require("axios");
-const readline = require("readline");
 
 // 📡 Lấy UserID từ username
 async function getUserId(username) {
@@ -151,9 +154,8 @@ function question(rl, msg) {
   return new Promise((resolve) => rl.question(msg, resolve));
 }
 
-// 🚀 MAIN
+// 🚀 Main
 (async () => {
-  ensureEnv();
   ensureRoot();
 
   const rl = readline.createInterface({
