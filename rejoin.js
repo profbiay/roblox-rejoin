@@ -41,10 +41,11 @@ function ensureRoot() {
   try {
     const uid = execSync("id -u").toString().trim();
     if (uid !== "0") {
-      const nodePath = execSync("which node").toString().trim();
       const scriptPath = __filename;
       console.log("🔐 Yêu cầu root, đang chuyển qua su...");
-      execSync(`su -c "${nodePath} ${scriptPath}"`, { stdio: "inherit" });
+      execSync(`su -c "PATH=$PATH:/data/data/com.termux/files/usr/bin node ${scriptPath}"`, {
+        stdio: "inherit"
+      });
       process.exit(0);
     }
   } catch (err) {
@@ -52,6 +53,7 @@ function ensureRoot() {
     process.exit(1);
   }
 }
+
 
 // ==== PHẦN GỐC (giữ nguyên) ====
 
