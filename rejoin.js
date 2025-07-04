@@ -1,50 +1,34 @@
 #!/usr/bin/env node
 
-const { execSync, exec } = require("child_process");
 const readline = require("readline");
+const { execSync, exec } = require("child_process");
+const fs = require("fs");
+
+// 📦 Ensure all required libs
+function ensureLibs() {
+  try {
+    require.resolve("axios");
+  } catch {
+    console.log("📦 Đang cài axios...");
+    execSync("npm install axios", { stdio: "inherit" });
+  }
+}
+ensureLibs();
 const axios = require("axios");
-const path = require("path");
 
-// 📦 Cài thư viện nếu thiếu
-function ensureDeps() {
-  const deps = ["axios"];
-  deps.forEach(dep => {
-    try {
-      require.resolve(dep);
-    } catch {
-      console.log(`📦 Đang cài ${dep}...`);
-      execSync(`npm install ${dep}`, { stdio: "inherit" });
-    }
-  });
-}
-
-// 🔧 Cài su, which, wake lock nếu thiếu
-function ensureBinaries() {
+// 🔧 Ensure required commands & tools
+function setupEnvironment() {
   try {
-    execSync("which su");
-  } catch {
-    console.log("⚙️ Đang cài 'su'...");
-    execSync("pkg install -y tsu", { stdio: "inherit" });
-  }
-
-  try {
-    execSync("which which");
-  } catch {
-    console.log("⚙️ Đang cài 'which'...");
-    execSync("pkg install -y which", { stdio: "inherit" });
-  }
-
-  try {
-    execSync("which termux-wake-lock");
-    exec("termux-wake-lock"); // 🔒 tránh sleep
-  } catch {
-    console.log("⚙️ Đang cài 'termux-api'...");
-    execSync("pkg install -y termux-api", { stdio: "inherit" });
-    exec("termux-wake-lock");
+    execSync("command -v su || pkg install tsu -y", { stdio: "inherit" });
+    execSync("command -v which || pkg install which -y", { stdio: "inherit" });
+    exec("termux-wake-lock"); // giữ máy không ngủ
+  } catch (err) {
+    console.log("⚠️ Không thể đảm bảo môi trường:", err.message);
   }
 }
+setupEnvironment();
 
-// 🔐 Yêu cầu root
+// 🔐 Auto root nếu chưa root
 function ensureRoot() {
   try {
     const uid = execSync("id -u").toString().trim();
@@ -82,7 +66,7 @@ async function getPresence(userId) {
       userIds: [userId]
     });
     return res.data.userPresences?.[0];
-  } catch (err) {
+  } catch {
     return null;
   }
 }
@@ -154,8 +138,6 @@ function question(rl, msg) {
 
 // 🚀 Main
 (async () => {
-  ensureDeps();
-  ensureBinaries();
   ensureRoot();
 
   const rl = readline.createInterface({
@@ -185,38 +167,48 @@ function question(rl, msg) {
   console.log(`👤 ${username} | 🎮 ${game.name} (${game.placeId})`);
   console.log(`🔁 Auto-check mỗi ${delayMin} phút`);
 
-  let isFirstCheck = true;
+  let joinedAt = 0;
 
   while (true) {
     const presence = await getPresence(userId);
+    const now = Date.now();
     let msg = "";
-
-    if (isFirstCheck) {
-      isFirstCheck = false;
-      if (!presence || presence.userPresenceType !== 2) {
-        console.log("🕒 User chưa online. Đang mở lại game...");
-        killApp();
-        launch(game.placeId, game.linkCode);
-        await new Promise(r => setTimeout(r, 15000)); // ⏳ chờ 15s load app
-        continue;
-      }
-    }
 
     if (!presence) {
       msg = "⚠️ Không lấy được trạng thái";
     } else if (presence.userPresenceType !== 2) {
       msg = "👋 User không online";
-      killApp();
-      launch(game.placeId, game.linkCode);
+
+      // chỉ rejoin nếu đã từng join & đủ delay
+      if (now - joinedAt > 30 * 1000) {
+        killApp();
+        launch(game.placeId, game.linkCode);
+        joinedAt = now;
+      } else {
+        msg += " (đợi thêm chút để tránh spam)";
+      }
     } else if (`${presence.placeId}` !== `${game.placeId}`) {
       msg = `⚠️ Đang ở sai game (${presence.placeId})`;
-      killApp();
-      launch(game.placeId, game.linkCode);
+
+      if (now - joinedAt > 30 * 1000) {
+        killApp();
+        launch(game.placeId, game.linkCode);
+        joinedAt = now;
+      } else {
+        msg += " (chờ delay để tránh spam)";
+      }
     } else {
       msg = "✅ Đang đúng game rồi!";
+      joinedAt = now;
     }
 
     console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
-    await new Promise((r) => setTimeout(r, delayMs));
+
+    // Delay phù hợp
+    if (msg.startsWith("✅")) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    } else {
+      await new Promise((r) => setTimeout(r, 5000));
+    }
   }
 })();
